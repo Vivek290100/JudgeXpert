@@ -1,15 +1,19 @@
 import React, { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { X, ChevronDown, ChevronUp } from "lucide-react";
-import { apiRequest } from "@/utils/axios/ApiRequest";
-import Pagination from "../layout/Pagination";
+import toast from "react-hot-toast";
+
+
+import Pagination from "@/components/layout/Pagination";
 import { ProblemDetailsSkeleton } from "@/utils/SkeletonLoader";
-import { IProblem, ProblemApiResponse } from "@/types/ProblemTypes";
+import { IProblem } from "@/types/ProblemTypes";
 import { Difficulty, ProblemStatus } from "@/utils/Enums";
+import { getProblemById, toggleProblemBlock, updateProblemDifficulty, updateProblemStatus } from "@/services/adminProblemService";
 
 const ProblemDetailsPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+
   const [problem, setProblem] = useState<IProblem | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -21,81 +25,93 @@ const ProblemDetailsPage: React.FC = () => {
   const testCasesPerPage = 10;
 
   useEffect(() => {
-    const fetchProblem = async () => {
+    if (!id) {
+      setError("No problem ID provided");
+      setLoading(false);
+      return;
+    }
+
+    const fetch = async () => {
       setLoading(true);
+      setError(null);
+
       try {
-        const response = await apiRequest<ProblemApiResponse>("get", `/admin/problems/${id}`);
-        if (response.success && response.data.problem) {
-          setProblem(response.data.problem);
-          setDifficulty(response.data.problem.difficulty);
-          setIsActive(!response.data.problem.isBlocked);
-          setStatus(response.data.problem.status);
-        } else {
-          setError(response.message || "Failed to fetch problem details");
-        }
-      } catch (err) {
-        console.error("Failed to fetch problem:", err);
-        setError("Failed to fetch problem details");
+        const problemData = await getProblemById(id);
+        if (!problemData) throw new Error("Problem not found");
+
+        setProblem(problemData);
+        setDifficulty(problemData.difficulty);
+        setIsActive(!problemData.isBlocked);
+        setStatus(problemData.status);
+      } catch (err: any) {
+        const msg = err.message || "Failed to load problem details";
+        setError(msg);
+        toast.error(msg);
+        console.error("Problem fetch error:", err);
       } finally {
         setLoading(false);
       }
     };
-    fetchProblem();
+
+    fetch();
   }, [id]);
 
+  // Toggle default code visibility
   const toggleCode = (codeId: string) => {
     setExpandedCode(expandedCode === codeId ? null : codeId);
   };
 
+  // Update difficulty
   const handleDifficultyChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
     const newDifficulty = e.target.value as Difficulty;
+    const previous = difficulty;
     setDifficulty(newDifficulty);
+
     try {
-      const response = await apiRequest<ProblemApiResponse>("patch", `/admin/problems/${id}`, {
-        difficulty: newDifficulty,
-      });
-      if (response.success) {
-        setProblem((prev) => (prev ? { ...prev, difficulty: newDifficulty } : null));
-      } else {
-        setError("Failed to update difficulty");
-      }
-    } catch (err) {
-      console.error("Failed to update difficulty:", err);
-      setError("Failed to update difficulty");
+      await updateProblemDifficulty(id!, newDifficulty);
+      setProblem((prev) => (prev ? { ...prev, difficulty: newDifficulty } : null));
+      toast.success("Difficulty updated successfully");
+    } catch (err: any) {
+      setDifficulty(previous);
+      const msg = err.message || "Failed to update difficulty";
+      setError(msg);
+      toast.error(msg);
     }
   };
 
+  // Update status (FREE/PREMIUM)
   const handleStatusChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
     const newStatus = e.target.value as ProblemStatus;
-    const previousStatus = status;
+    const previous = status;
     setStatus(newStatus);
+
     try {
-      const response = await apiRequest<ProblemApiResponse>("patch", `/admin/problems/${id}/status`, {
-        status: newStatus,
-      });
-      if (!response.success) {
-        throw new Error(response.message || "Failed to update status");
-      }
+      await updateProblemStatus(id!, newStatus);
       setProblem((prev) => (prev ? { ...prev, status: newStatus } : null));
-    } catch (err) {
-      console.error("Failed to update status:", err);
-      setError("Failed to update problem status");
-      setStatus(previousStatus);
+      toast.success("Status updated successfully");
+    } catch (err: any) {
+      setStatus(previous);
+      const msg = err.message || "Failed to update status";
+      setError(msg);
+      toast.error(msg);
     }
   };
 
+  // Toggle active/blocked status
   const handleActiveChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const newStatus = e.target.value === "true";
-    const previousStatus = isActive;
-    setIsActive(newStatus);
+    const newActive = e.target.value === "true";
+    const previous = isActive;
+    setIsActive(newActive);
+
     try {
-      const endpoint = newStatus ? "unblock" : "block";
-      const response = await apiRequest<ProblemApiResponse>("patch", `/admin/problems/${id}/${endpoint}`, {}); 
-      console.log("API Response:", response);
-    } catch (err) {
-      console.error(`Failed to ${newStatus ? "activate" : "deactivate"} problem:`, err);
-      setError(`Failed to ${newStatus ? "activate" : "deactivate"} problem: ${err}`);
-      setIsActive(previousStatus);
+      await toggleProblemBlock(id!, !newActive); // !newActive = shouldBlock
+      setProblem((prev) => (prev ? { ...prev, isBlocked: !newActive } : null));
+      toast.success(`Problem ${newActive ? "activated" : "deactivated"} successfully`);
+    } catch (err: any) {
+      setIsActive(previous);
+      const msg = err.message || `Failed to ${newActive ? "activate" : "deactivate"} problem`;
+      setError(msg);
+      toast.error(msg);
     }
   };
 
@@ -104,7 +120,9 @@ const ProblemDetailsPage: React.FC = () => {
   };
 
   if (loading) return <ProblemDetailsSkeleton />;
+
   if (error) return <div className="text-center text-red-500 p-6 text-lg">{error}</div>;
+
   if (!problem) return <div className="text-center text-gray-500 dark:text-gray-400 p-6 text-lg">Problem not found</div>;
 
   const paginatedTestCases = problem.testCaseIds.slice(
@@ -120,6 +138,7 @@ const ProblemDetailsPage: React.FC = () => {
 
   return (
     <div className="container mx-auto px-4 py-9 min-h-screen bg-background">
+      {/* Header with back button */}
       <div className="flex justify-between items-center mb-8 bg-gray-50 dark:bg-gray-800 p-6 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
         <h1 className="text-3xl font-bold text-primary tracking-tight truncate max-w-[80%]">{problem.title}</h1>
         <button
@@ -131,7 +150,9 @@ const ProblemDetailsPage: React.FC = () => {
         </button>
       </div>
 
+      {/* Main Content */}
       <div className="space-y-8">
+        {/* Problem Details Card */}
         <div className="bg-gray-50 dark:bg-gray-800 p-6 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
           <h2 className="text-xl font-semibold text-primary mb-6 border-b border-gray-200 dark:border-gray-700 pb-2">
             Problem Details
@@ -174,6 +195,7 @@ const ProblemDetailsPage: React.FC = () => {
                 </select>
               </div>
             </div>
+
             <div className="space-y-4">
               <div className="flex items-center gap-3">
                 <strong className="font-semibold text-primary w-24 shrink-0">Status:</strong>
@@ -203,6 +225,7 @@ const ProblemDetailsPage: React.FC = () => {
           </div>
         </div>
 
+        {/* Description */}
         <div className="bg-gray-50 dark:bg-gray-800 p-6 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
           <h3 className="text-xl font-semibold text-primary mb-4 border-b border-gray-200 dark:border-gray-700 pb-2">
             Description
@@ -212,6 +235,7 @@ const ProblemDetailsPage: React.FC = () => {
           </div>
         </div>
 
+        {/* Default Codes */}
         <div className="bg-gray-50 dark:bg-gray-800 p-6 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
           <h3 className="text-xl font-semibold text-primary mb-4 border-b border-gray-200 dark:border-gray-700 pb-2">
             Default Codes
@@ -251,6 +275,7 @@ const ProblemDetailsPage: React.FC = () => {
           )}
         </div>
 
+        {/* Test Cases */}
         <div className="bg-gray-50 dark:bg-gray-800 p-6 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
           <h3 className="text-xl font-semibold text-primary mb-4 border-b border-gray-200 dark:border-gray-700 pb-2">
             Test Cases
@@ -267,7 +292,7 @@ const ProblemDetailsPage: React.FC = () => {
                   </thead>
                   <tbody>
                     {paginatedTestCases.map((testCase) => {
-                      const formattedTestCase = formatTestCase(testCase);
+                      const formatted = formatTestCase(testCase);
                       return (
                         <tr
                           key={testCase._id}
@@ -275,12 +300,12 @@ const ProblemDetailsPage: React.FC = () => {
                         >
                           <td className="px-4 py-3">
                             <pre className="bg-gray-100 dark:bg-gray-900 p-2 rounded text-sm whitespace-pre-wrap">
-                              {formattedTestCase.input}
+                              {formatted.input}
                             </pre>
                           </td>
                           <td className="px-4 py-3">
                             <pre className="bg-gray-100 dark:bg-gray-900 p-2 rounded text-sm whitespace-pre-wrap">
-                              {formattedTestCase.output}
+                              {formatted.output}
                             </pre>
                           </td>
                         </tr>
@@ -289,6 +314,7 @@ const ProblemDetailsPage: React.FC = () => {
                   </tbody>
                 </table>
               </div>
+
               <div className="flex justify-center">
                 <Pagination
                   currentPage={testCasePage}

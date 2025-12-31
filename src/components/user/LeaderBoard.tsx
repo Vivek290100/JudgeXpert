@@ -1,24 +1,28 @@
 import React, { useState, useEffect } from "react";
-import { apiRequest } from "@/utils/axios/ApiRequest";
+import { Trophy, Medal, Award, Activity, Users, AlertCircle } from "lucide-react";
 import Table from "@/components/layout/Table";
 import Pagination from "@/components/layout/Pagination";
 import { useTheme } from "@/contexts/ThemeContext";
-import { ApiResponse, ProblemsResponse } from "@/types/ProblemTypes";
-import { Column } from "@/types/ComponentsTypes";
-import { Trophy, Medal, Award, Activity, Users } from "lucide-react";
 import { useSelector } from "react-redux";
 import { RootState } from "@/redux/Store";
-import { LeaderboardApiResponse, LeaderboardEntry, UserStats } from "@/types/LeaderboardTypes";
 import { TableSkeleton } from "@/utils/SkeletonLoader";
 
+import { getLeaderboard } from "@/services/leaderboardService";
+// ───────────────────────────────────────────────────────────────
+
+import { LeaderboardEntry, UserStats } from "@/types/LeaderboardTypes";
+import { Column } from "@/types/ComponentsTypes";
 
 const LeaderboardPage: React.FC = () => {
   const { theme } = useTheme();
+  const user = useSelector((state: RootState) => state.auth.user);
+
   const [leaderboardData, setLeaderboardData] = useState<LeaderboardEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
+
   const [userStats, setUserStats] = useState<UserStats>({
     totalProblems: 0,
     solvedProblems: 0,
@@ -27,76 +31,36 @@ const LeaderboardPage: React.FC = () => {
     score: undefined,
   });
 
-  const user = useSelector((state: RootState) => state.auth.user);
-
   useEffect(() => {
     const fetchLeaderboard = async () => {
       setLoading(true);
-      try {
-        const leaderboardResponse = await apiRequest<ApiResponse<LeaderboardApiResponse>>(
-          "get",
-          `/leaderboard?page=${currentPage}&limit=10`
-        );
-        if (leaderboardResponse.success) {
-          setLeaderboardData(leaderboardResponse.data.leaderboard);
-          setTotalPages(leaderboardResponse.data.totalPages);
+      setError(null);
 
-          const userEntry = leaderboardResponse.data.leaderboard.find(
-            (entry) => entry._id === user?.id
-          );
-          if (userEntry) {
-            setUserStats((prev) => ({
-              ...prev,
-              rank: userEntry.rank,
-              score: userEntry.score,
-            }));
-          }
-        } else {
-          setError(leaderboardResponse.message || "Failed to load leaderboard");
+      try {
+        const data = await getLeaderboard(currentPage, 10);
+
+        setLeaderboardData(data.leaderboard);
+        setTotalPages(data.totalPages);
+
+        const userEntry = data.leaderboard.find((entry) => entry._id === user?.id);
+        if (userEntry) {
+          setUserStats((prev) => ({
+            ...prev,
+            rank: userEntry.rank,
+            score: userEntry.score,
+          }));
         }
-      } catch (err) {
-        setError("Failed to fetch leaderboard. Please try again.");
-        console.error(err);
+      } catch (err: any) {
+        setError(err.message || "Failed to load leaderboard");
+        console.error("Leaderboard fetch error:", err);
       } finally {
         setLoading(false);
       }
     };
 
-    const fetchUserStats = async () => {
-      try {
-        const problemsResponse = await apiRequest<ApiResponse<ProblemsResponse>>(
-          "get",
-          `/problems?page=1&limit=1000` 
-        );
-        if (problemsResponse.success && problemsResponse.data) {
-          const problems = problemsResponse.data.problems.filter((p) => !p.isBlocked);
-          const userProblemStatus = problemsResponse.data.userProblemStatus || [];
-
-          const totalProblems = problems.length;
-          const solvedProblems = userProblemStatus.filter((status) => status.solved).length;
-          const solvedByDifficulty = { EASY: 0, MEDIUM: 0, HARD: 0 };
-
-          problems.forEach((problem) => {
-            if (userProblemStatus.find((status) => status.problemId === problem._id && status.solved)) {
-              solvedByDifficulty[problem.difficulty]++;
-            }
-          });
-
-          setUserStats((prev) => ({
-            ...prev,
-            totalProblems,
-            solvedProblems,
-            solvedByDifficulty,
-          }));
-        }
-      } catch (err) {
-        console.error("Failed to fetch user stats:", err);
-      }
-    };
-
     fetchLeaderboard();
-    if (user) fetchUserStats();
   }, [currentPage, user]);
+
 
   const renderRankBadge = (rank: number) => {
     if (rank === 1) {
@@ -171,17 +135,23 @@ const LeaderboardPage: React.FC = () => {
   const progressPercentage = Math.round((userStats.solvedProblems / userStats.totalProblems) * 100) || 0;
 
   if (loading) {
-    return <TableSkeleton />
+    return <TableSkeleton />;
   }
 
   if (error) {
-    return <div className="p-6 text-red-500">{error}</div>;
+    return (
+      <div className="p-6 text-red-500 flex items-center justify-center">
+        <AlertCircle className="w-6 h-6 mr-2" />
+        {error}
+      </div>
+    );
   }
 
   return (
     <div className="min-h-[calc(100vh-5rem)] p-4">
       <div className="max-w-7xl mx-auto">
         <div className="flex flex-col md:flex-row gap-4">
+          {/* User Stats Card */}
           <div className="w-full md:w-64 flex flex-col gap-4">
             <div className="bg-card rounded-lg shadow-md p-4 border border-border">
               <h2 className="text-lg font-bold mb-3 flex items-center">
@@ -197,11 +167,14 @@ const LeaderboardPage: React.FC = () => {
                 </div>
                 <div>
                   <div className="text-sm text-muted-foreground">Score</div>
-                  <div className="text-2xl font-bold text-blue-500">{userStats.score || user?.problemsSolved || 0}</div>
+                  <div className="text-2xl font-bold text-blue-500">
+                    {userStats.score || user?.problemsSolved || 0}
+                  </div>
                 </div>
               </div>
             </div>
 
+            {/* Problem Solving Progress */}
             <div className="bg-card rounded-lg shadow-md p-4 border border-border">
               <h2 className="text-lg font-bold mb-3 flex items-center">
                 <Activity className="w-5 h-5 mr-2 text-blue-500" />
@@ -217,7 +190,7 @@ const LeaderboardPage: React.FC = () => {
                 <div
                   className="bg-blue-500 h-2.5 rounded-full"
                   style={{ width: `${progressPercentage}%` }}
-                ></div>
+                />
               </div>
               <div className="grid grid-cols-3 gap-2 mt-4">
                 <div className="flex flex-col items-center p-2 bg-green-100 dark:bg-green-900/30 rounded-lg">
@@ -242,6 +215,7 @@ const LeaderboardPage: React.FC = () => {
             </div>
           </div>
 
+          {/* Leaderboard Table */}
           <div className="flex-1">
             <div className="bg-card rounded-lg shadow-md border border-border">
               <div className="p-4 border-b border-border flex items-center justify-between">

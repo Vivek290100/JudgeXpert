@@ -1,84 +1,54 @@
-import { useState, useEffect } from "react";
+import  { useState, useEffect } from "react";
 import { useSelector } from "react-redux";
 import { useNavigate } from "react-router-dom";
-import { RootState } from "../../redux/Store";
 import { FaGithub, FaLinkedin, FaStar, FaChevronRight } from "react-icons/fa";
-import { apiRequest } from "@/utils/axios/ApiRequest";
+
+import { getUserProblemStats } from "@/services/userService";
+import { getLeaderboard } from "@/services/leaderboardService";
+
+import { RootState } from "@/redux/Store";
 import EditProfile from "./EditProfile";
-import {
-  ApiResponse,
-  ProblemsResponse,
-  IProblem,
-  IUserProblemStatus,
-} from "@/types/ProblemTypes";
+import { IProblem, IUserProblemStatus } from "@/types/ProblemTypes";
+import { LeaderboardEntry } from "@/types/LeaderboardTypes";
 import { Difficulty } from "@/types/Enums";
-import {
-  LeaderboardApiResponse,
-  LeaderboardEntry,
-} from "@/types/LeaderboardTypes";
 
 const UserDashboard = () => {
   const { user, isAuthenticated } = useSelector((state: RootState) => state.auth);
+  const navigate = useNavigate();
+
   const [isEditProfileOpen, setIsEditProfileOpen] = useState(false);
-  const [userProblemStatus, setUserProblemStatus] = useState<IUserProblemStatus[]>([]);
   const [problems, setProblems] = useState<IProblem[]>([]);
+  const [userProblemStatus, setUserProblemStatus] = useState<IUserProblemStatus[]>([]);
   const [totalProblemsInDb, setTotalProblemsInDb] = useState(0);
   const [userRank, setUserRank] = useState<number | undefined>(undefined);
   const [loading, setLoading] = useState(false);
-  const navigate = useNavigate();
 
-  const fetchUserStats = async () => {
-    setLoading(true);
-    try {
-      const problemsResponse = await apiRequest<ApiResponse<ProblemsResponse>>(
-        "get",
-        "/problems?page=1&limit=1000"
-      );
-      if (problemsResponse.success && problemsResponse.data) {
-        setProblems(problemsResponse.data.problems || []);
-        setUserProblemStatus(problemsResponse.data.userProblemStatus || []);
-        setTotalProblemsInDb(problemsResponse.data.totalProblemsInDb || 0);
-      }
+  useEffect(() => {
+    if (!isAuthenticated || !user) return;
 
-      const leaderboardResponse = await apiRequest<ApiResponse<LeaderboardApiResponse>>(
-        "get",
-        "/leaderboard?page=1&limit=100"
-      );
-      if (leaderboardResponse.success && leaderboardResponse.data) {
-        const userEntry = leaderboardResponse.data.leaderboard.find(
-          (entry: LeaderboardEntry) => entry._id === user?.id
-        );
+    const fetchStats = async () => {
+      setLoading(true);
+
+      try {
+        const statsData = await getUserProblemStats();
+        setProblems(statsData.problems);
+        setUserProblemStatus(statsData.userProblemStatus);
+        setTotalProblemsInDb(statsData.totalProblemsInDb);
+
+        const lbData = await getLeaderboard(1, 100);
+        const userEntry = lbData.leaderboard.find((entry: LeaderboardEntry) => entry._id === user.id);
         if (userEntry) {
           setUserRank(userEntry.rank);
         }
+      } catch (err: any) {
+        console.error("Failed to fetch dashboard stats:", err);
+      } finally {
+        setLoading(false);
       }
-    } catch (err) {
-      console.error("Failed to fetch stats:", err);
-    } finally {
-      setLoading(false);
-    }
-  };
+    };
 
-  useEffect(() => {
-    if (isAuthenticated && user) {
-      fetchUserStats();
-    }
+    fetchStats();
   }, [isAuthenticated, user]);
-
-  if (!isAuthenticated || !user) {
-    return (
-      <div className="bg-black text-white min-h-screen flex items-center justify-center p-6">
-        <div className="text-center">
-          <button
-            className="px-8 py-3 bg-yellow-500 text-black text-lg font-medium rounded-lg hover:bg-yellow-600 transition"
-            onClick={() => navigate("/login")}
-          >
-            Log In
-          </button>
-        </div>
-      </div>
-    );
-  }
 
   const solvedProblems = userProblemStatus.filter((status) => status.solved).length;
   const progressPercentage = totalProblemsInDb
@@ -110,10 +80,25 @@ const UserDashboard = () => {
     }
   };
 
+  if (!isAuthenticated || !user) {
+    return (
+      <div className="bg-black text-white min-h-screen flex items-center justify-center p-6">
+        <div className="text-center">
+          <button
+            className="px-8 py-3 bg-yellow-500 text-black text-lg font-medium rounded-lg hover:bg-yellow-600 transition"
+            onClick={() => navigate("/login")}
+          >
+            Log In
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="bg-background text-primary min-h-screen p-4">
       <div className="mx-auto max-w-7xl flex flex-col gap-6 lg:flex-row">
-        {/* Left Section */}
+        {/* Profile Card */}
         <div className="flex flex-col gap-6 w-full lg:w-1/4">
           <div className="bg-card p-6 rounded-xl shadow border">
             <div className="flex flex-col items-center">
@@ -133,6 +118,7 @@ const UserDashboard = () => {
               <h2 className="text-lg font-semibold text-center">Profile</h2>
             </div>
           </div>
+
           <div className="bg-gray-800 rounded-xl overflow-hidden">
             <button
               className="w-full p-4 text-left text-gray-300 hover:bg-gray-700 flex items-center justify-between"
@@ -144,6 +130,7 @@ const UserDashboard = () => {
           </div>
         </div>
 
+        {/* Contest & Other Info */}
         <div className="flex flex-col gap-6 w-full lg:w-2/4">
           <div className="bg-card p-6 rounded-xl shadow border">
             <h2 className="text-xl font-semibold mb-1">{user.fullName || "Vivek"}</h2>
@@ -153,17 +140,19 @@ const UserDashboard = () => {
                 href={user.github || "#"}
                 className="flex items-center gap-2 text-primary hover:text-white"
                 target="_blank"
+                rel="noopener noreferrer"
               >
                 <FaGithub />
-                <span>{user.github ? "Github" : "www.github"}</span>
+                <span>{user.github ? "GitHub" : "www.github"}</span>
               </a>
               <a
                 href={user.linkedin || "#"}
-                className="flex items-center gap-2 text-gprimary hover:text-white"
+                className="flex items-center gap-2 text-primary hover:text-white"
                 target="_blank"
+                rel="noopener noreferrer"
               >
                 <FaLinkedin />
-                <span>{user.linkedin ? "Linkedin" : "www.linkedin"}</span>
+                <span>{user.linkedin ? "LinkedIn" : "www.linkedin"}</span>
               </a>
             </div>
           </div>
@@ -192,6 +181,7 @@ const UserDashboard = () => {
           </div>
         </div>
 
+        {/* Rank & Acceptance */}
         <div className="flex flex-col gap-6 w-full lg:w-1/4">
           <div className="bg-card p-6 rounded-xl shadow border">
             <h3 className="text-xl font-semibold mb-4">My Rank</h3>
@@ -258,6 +248,7 @@ const UserDashboard = () => {
         </div>
       </div>
 
+      {/* Edit Profile Modal */}
       <EditProfile isOpen={isEditProfileOpen} onClose={() => setIsEditProfileOpen(false)} />
     </div>
   );

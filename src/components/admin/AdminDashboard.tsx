@@ -1,8 +1,14 @@
-import { StatCardProps, DashboardStatsApiResponse, RevenueStatsApiResponse } from "@/types/AdminTypes";
-import { apiRequest } from "@/utils/axios/ApiRequest";
-// import { Download } from "lucide-react";
-import { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
+import toast from "react-hot-toast";
+
+import {
+  getDashboardStats,
+  getRevenueStats,
+} from "@/services/adminDashboardService";
+// ───────────────────────────────────────────────────────────────
+
+import { StatCardProps, DashboardStatsApiResponse } from "@/types/AdminTypes";
 
 const StatCard = ({ title, value, label, color }: StatCardProps) => (
   <div className="bg-card p-3 sm:p-4 md:p-6 rounded-lg border border-border shadow-sm">
@@ -51,46 +57,54 @@ const RevenueBarChart = ({
   );
 };
 
-export default function AdminDashboard() {
+const AdminDashboard: React.FC = () => {
   const [stats, setStats] = useState<DashboardStatsApiResponse["data"]>({
     totalUsers: 0,
     subscribers: 0,
     totalProblems: 0,
     totalContests: 0,
   });
+
   const [revenueData, setRevenueData] = useState<{ period: string; revenue: number; date: string }[]>([]);
   const [period, setPeriod] = useState<"monthly" | "yearly">("yearly");
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const fetchDashboardStats = async () => {
+    const fetchStats = async () => {
       try {
-        const response = await apiRequest<DashboardStatsApiResponse>("get", "/admin/dashboard-stats");
-        if (response.success && response.data) setStats(response.data);
-      } catch (err) {
-        console.error("Failed to fetch dashboard stats:", err);
+        const data = await getDashboardStats();
+        setStats(data);
+      } catch (err: any) {
+        toast.error("Failed to load dashboard stats");
+        console.error("Dashboard stats error:", err);
       }
     };
-    fetchDashboardStats();
+
+    fetchStats();
   }, []);
 
+  // Fetch revenue data when period changes
   useEffect(() => {
-    const fetchRevenueStats = async () => {
+    const fetchRevenue = async () => {
+      setLoading(true);
       try {
-        const response = await apiRequest<RevenueStatsApiResponse>("get", `/admin/revenue-stats?period=${period}`);
-        if (response.success && response.data) {
-          setRevenueData(
-            response.data.map((stat) => ({
-              period: stat.period,
-              revenue: stat.revenue,
-              date: stat.date,
-            }))
-          );
-        }
-      } catch (err) {
-        console.error("Failed to fetch revenue stats:", err);
+        const data = await getRevenueStats(period);
+        setRevenueData(
+          data.map((stat) => ({
+            period: stat.period,
+            revenue: stat.revenue,
+            date: stat.date,
+          }))
+        );
+      } catch (err: any) {
+        toast.error("Failed to load revenue data");
+        console.error("Revenue stats error:", err);
+      } finally {
+        setLoading(false);
       }
     };
-    fetchRevenueStats();
+
+    fetchRevenue();
   }, [period]);
 
   const formatNumber = (num: number): string => {
@@ -99,7 +113,11 @@ export default function AdminDashboard() {
     return num.toString();
   };
 
-  const totalRevenue = useMemo(() => revenueData.reduce((sum, item) => sum + item.revenue, 0), [revenueData]);
+  const totalRevenue = useMemo(
+    () => revenueData.reduce((sum, item) => sum + item.revenue, 0),
+    [revenueData]
+  );
+
   const topRevenue = useMemo(() => {
     const max = Math.max(...revenueData.map((d) => d.revenue));
     return revenueData.find((d) => d.revenue === max);
@@ -107,6 +125,7 @@ export default function AdminDashboard() {
 
   return (
     <div className="w-full bg-background text-foreground p-4 sm:p-6 mt-6">
+      {/* Stats Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
         <StatCard title="Total Users" value={formatNumber(stats.totalUsers)} label="Total Users" color="sky-500" />
         <StatCard title="Subscribers" value={formatNumber(stats.subscribers)} label="Subscribers" color="orange-500" />
@@ -114,6 +133,7 @@ export default function AdminDashboard() {
         <StatCard title="Total Contests" value={formatNumber(stats.totalContests)} label="Total Contests" color="pink-500" />
       </div>
 
+      {/* Period Toggle + (Commented Download) */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
         <div className="flex gap-2">
           <button
@@ -133,37 +153,47 @@ export default function AdminDashboard() {
             Yearly
           </button>
         </div>
+        {/* Uncomment if you want to add download later */}
         {/* <button className="flex items-center gap-2 bg-accent text-accent-foreground px-4 py-2 text-sm font-medium rounded-lg hover:bg-opacity-90 transition-colors w-full sm:w-auto">
           <Download className="w-4 h-4" />
           <span>Download Report</span>
         </button> */}
       </div>
 
+      {/* Revenue Chart + Insights */}
       <div className="w-full flex flex-col lg:flex-row gap-6 bg-card rounded-lg p-6 border border-border shadow-sm">
         <div className="w-full lg:w-8/12">
           <h3 className="text-foreground text-lg font-semibold mb-4">Revenue Chart</h3>
-          <div className="h-96">
-            <RevenueBarChart height={360} data={revenueData} period={period} />
-          </div>
+          {loading ? (
+            <div className="h-96 flex items-center justify-center">
+              <p className="text-muted-foreground">Loading revenue data...</p>
+            </div>
+          ) : (
+            <div className="h-96">
+              <RevenueBarChart height={360} data={revenueData} period={period} />
+            </div>
+          )}
         </div>
 
         <div className="w-full lg:w-4/12 flex flex-col gap-6">
           <h3 className="text-foreground text-lg font-semibold mb-2">Revenue Insights</h3>
-          
+
           <StatCard
             title="Total Revenue"
             value={`₹${totalRevenue.toLocaleString()}`}
             label="Across selected period"
             color="green-500"
           />
-          
+
           {topRevenue && (
             <StatCard
               title="Top Earning Period"
               value={`₹${topRevenue.revenue.toLocaleString()}`}
-              label={period === "monthly" 
-                ? `${new Date(topRevenue.date).toLocaleString('default', { month: 'long' })} ${new Date(topRevenue.date).getFullYear()}`
-                : `Year ${topRevenue.period}`}
+              label={
+                period === "monthly"
+                  ? `${new Date(topRevenue.date).toLocaleString("default", { month: "long" })} ${new Date(topRevenue.date).getFullYear()}`
+                  : `Year ${topRevenue.period}`
+              }
               color="blue-500"
             />
           )}
@@ -171,4 +201,6 @@ export default function AdminDashboard() {
       </div>
     </div>
   );
-}
+};
+
+export default AdminDashboard;

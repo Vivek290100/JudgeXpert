@@ -1,46 +1,13 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { useParams, Link } from "react-router-dom";
-import { apiRequest } from "@/utils/axios/ApiRequest";
 import { Trophy, AlertCircle, Clock, X } from "lucide-react";
 import { ContestDetailsSkeleton } from "@/utils/SkeletonLoader";
 import { Tooltip } from "react-tooltip";
 import { FaMedal } from "react-icons/fa";
+import { Contest, LeaderboardEntry } from "@/types/ContestResultsTypes";
+import { getContestResults } from "@/services/contestService";
 
-interface Problem {
-  _id: string;
-  title: string;
-  slug: string;
-  difficulty: "EASY" | "MEDIUM" | "HARD";
-}
 
-interface Participant {
-  _id: string;
-  userName: string;
-}
-
-interface Submission {
-  userId: string;
-  userName: string;
-  executionTime: number;
-  submittedAt: string;
-}
-
-interface Contest {
-  _id: string;
-  title: string;
-  startTime: string;
-  endTime: string;
-  problems: Problem[];
-  participants: Participant[];
-  latestSubmissions: { [problemId: string]: Submission[] };
-}
-
-interface LeaderboardEntry extends Participant {
-  problemsSolved: number;
-  score: number;
-  totalExecutionTime: number;
-  solvedProblems: { [problemId: string]: number };
-}
 
 const ContestResultsPage: React.FC = () => {
   const { contestId } = useParams<{ contestId: string }>();
@@ -52,33 +19,35 @@ const ContestResultsPage: React.FC = () => {
   const [selectedParticipant, setSelectedParticipant] = useState<LeaderboardEntry | null>(null);
 
   useEffect(() => {
-    const fetchContestDetails = async () => {
-      if (!contestId) {
-        setError("Invalid contest ID");
-        setLoading(false);
-        return;
-      }
+    if (!contestId) {
+      setError("Invalid contest ID");
+      setLoading(false);
+      return;
+    }
+
+    const loadResults = async () => {
+      setLoading(true);
+      setError(null);
 
       try {
-        const contestResponse = await apiRequest<{ success: boolean; data: { contest: Contest } }>(
-          "get",
-          `/contests/${contestId}`
-        );
-
-        if (contestResponse.success && contestResponse.data.contest) {
-          setContest(contestResponse.data.contest);
-        } else {
-          setError("Failed to load contest details");
+        const contestData = await getContestResults(contestId);
+        if (!contestData) {
+          throw new Error("Contest results not found");
         }
+        setContest(contestData);
       } catch (err: any) {
-        setError(err.response?.data?.message || "Failed to fetch contest details.");
-        console.error("Fetch contest error:", err);
+        const errorMsg =
+          err?.response?.data?.message ||
+          err.message ||
+          "Failed to load contest results. Please try again later.";
+        setError(errorMsg);
+        console.error("Error fetching contest results:", err);
       } finally {
         setLoading(false);
       }
     };
 
-    fetchContestDetails();
+    loadResults();
   }, [contestId]);
 
   const formatDate = (dateString: string) => {

@@ -1,12 +1,15 @@
 import React, { useState, useEffect, useRef } from "react";
-import { apiRequest } from "@/utils/axios/ApiRequest";
-import { CheckCircle, Unlock, Lock, Search, X } from "lucide-react";
-import Table from "../layout/Table";
-import Pagination from "../layout/Pagination";
-import { useDebounce } from "@/hooks/useDebounce";
+import { CheckCircle, Lock, Search, Unlock, X } from "lucide-react";
+import toast from "react-hot-toast";
+
+
+import Table from "@/components/layout/Table";
+import Pagination from "@/components/layout/Pagination";
 import { TableSkeleton } from "@/utils/SkeletonLoader";
-import { AdminUser, AdminUsersResponse } from "@/types/AdminTypes";
-import { ApiResponse } from "@/types/ProblemTypes";
+import { useDebounce } from "@/hooks/useDebounce";
+import { AdminUser } from "@/types/AdminTypes";
+import { Column } from "@/types/ComponentsTypes";
+import { getUsers, toggleUserBlockStatus } from "@/services/adminService";
 
 const ListUsers: React.FC = () => {
   const [users, setUsers] = useState<AdminUser[]>([]);
@@ -19,54 +22,52 @@ const ListUsers: React.FC = () => {
   const itemsPerPage = 10;
   const searchInputRef = useRef<HTMLInputElement>(null);
 
-  const fetchUsers = async (page: number, query: string = "") => {
-    setLoading(true);
-    try {
-      const response = await apiRequest<ApiResponse<AdminUsersResponse>>(
-        "get",
-        `/admin/users?page=${page}&limit=${itemsPerPage}&search=${encodeURIComponent(query)}`
-      );
-      
-      if (response.success && response.data) {
-        setUsers(response.data.users);
-        setTotalPages(response.data.totalPages || 1);
-      } else {
-        setError("Invalid response structure");
-      }
-    } catch (err) {
-      setError("Failed to fetch users");
-      console.error("Fetch error:", err);
-    } finally {
-      setLoading(false);
-      searchInputRef.current?.focus();
-    }
-  };
-
   useEffect(() => {
-    fetchUsers(currentPage, debouncedSearchQuery);
+    const fetch = async () => {
+      setLoading(true);
+      setError(null);
+
+      try {
+        const data = await getUsers(currentPage, itemsPerPage, debouncedSearchQuery);
+        setUsers(data.users);
+        setTotalPages(data.totalPages);
+      } catch (err: any) {
+        const msg = err.message || "Failed to load users";
+        setError(msg);
+        toast.error(msg);
+        console.error("Users fetch error:", err);
+      } finally {
+        setLoading(false);
+        searchInputRef.current?.focus();
+      }
+    };
+
+    fetch();
   }, [currentPage, debouncedSearchQuery]);
 
-  const handleBlockUnblock = async (userId: string, isBlocked: boolean) => {
+  const handleBlockUnblock = async (userId: string, currentIsBlocked: boolean) => {
+    const shouldBlock = !currentIsBlocked;
+    const action = shouldBlock ? "block" : "unblock";
+
+    // Optimistic update
     const originalUsers = [...users];
-    const endpoint = isBlocked ? `/admin/users/${userId}/unblock` : `/admin/users/${userId}/block`;
-    
-    setUsers((prevUsers) =>
-      prevUsers.map((user) =>
-        user.id === userId ? { ...user, isBlocked: !isBlocked } : user
-      )
+    setUsers((prev) =>
+      prev.map((u) => (u.id === userId ? { ...u, isBlocked: shouldBlock } : u))
     );
 
     try {
-      const response = await apiRequest<ApiResponse<AdminUsersResponse>>("post", endpoint);
-      if (!response.success) throw new Error("Failed to update user status");
-    } catch (err) {
-      console.error("Failed to update user status:", err);
+      await toggleUserBlockStatus(userId, shouldBlock);
+      toast.success(`User ${action}ed successfully!`);
+    } catch (err: any) {
+      // Rollback on failure
       setUsers(originalUsers);
-      setError("Failed to update user status");
+      const msg = err.message || `Failed to ${action} user`;
+      toast.error(msg);
+      console.error(`User ${action} error:`, err);
     }
   };
 
-  const columns = [
+  const columns: Column<AdminUser>[] = [
     {
       key: "sno",
       header: "S.No",
@@ -124,10 +125,12 @@ const ListUsers: React.FC = () => {
   ];
 
   if (loading && !users.length) return <TableSkeleton />;
+
   if (error) return <div className="text-red-500 text-center py-4">{error}</div>;
 
   return (
     <div className="container mx-auto px-4 py-9 min-h-screen flex flex-col">
+      {/* Header + Search */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
         <h1 className="text-2xl font-semibold text-primary">Users List</h1>
         <div className="relative w-full sm:w-72 flex items-center">
@@ -166,10 +169,16 @@ const ListUsers: React.FC = () => {
         </div>
       </div>
 
+      {/* Table */}
       <div className="flex-1">
-        <Table data={users} columns={columns} emptyMessage="No users found" />
+        <Table
+          data={users}
+          columns={columns}
+          emptyMessage="No users found"
+        />
       </div>
 
+      {/* Pagination */}
       {totalPages > 1 && (
         <div className="mt-6">
           <Pagination

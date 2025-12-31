@@ -1,10 +1,9 @@
 import React, { useState, useEffect } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
-import { apiRequest } from "@/utils/axios/ApiRequest";
-import { ApiResponse } from "@/types/ProblemTypes";
 import { Clock, Code2, AlertCircle, ListChecks, Trophy } from "lucide-react";
 import toast from "react-hot-toast";
 import { ContestDetailsSkeleton } from "@/utils/SkeletonLoader";
+import { getContestDetail, getMyRegisteredContests } from "@/services/contestService";
 
 interface Problem {
   _id: string;
@@ -38,53 +37,36 @@ const ContestDetailsPage: React.FC = () => {
   const [isRegistered, setIsRegistered] = useState<boolean>(false);
 
   useEffect(() => {
-    const fetchContest = async () => {
-      if (!contestId) {
-        setError("Invalid contest ID");
-        setLoading(false);
-        return;
-      }
+    if (!contestId) {
+      setError("Invalid contest ID");
+      setLoading(false);
+      return;
+    }
 
+    const loadContestData = async () => {
+      setLoading(true);
+      setError(null);
       try {
-        const response = await apiRequest<ApiResponse<{ contest: Contest }>>(
-          "get",
-          `/contests/${contestId}`
-        );
-        console.log("contest detail resp", response);
+        const [contestData, registeredIds] = await Promise.all([
+          getContestDetail(contestId),
+          getMyRegisteredContests(),
+        ]);
 
-        if (response.success && response.data.contest) {
-          setContest(response.data.contest);
-          console.log("Loaded contest:", response.data.contest);
-        } else {
-          setError(response.message || "Failed to load contest details");
+        if (!contestData) {
+          throw new Error("Contest not found");
         }
+
+        setContest(contestData);
+        setIsRegistered(registeredIds.includes(contestId));
       } catch (err: any) {
-        setError(err.response?.data?.message || "Failed to fetch contest. Please try again.");
-        console.error("Fetch contest error:", err);
+        setError(err?.response?.data?.message || "Failed to load contest details");
+        console.error("Error loading contest:", err);
       } finally {
         setLoading(false);
       }
     };
 
-    const fetchRegistrationStatus = async () => {
-      if (!contestId) return;
-      try {
-        const response = await apiRequest<ApiResponse<{ contestIds: string[] }>>(
-          "get",
-          "/registered-contests"
-        );
-        console.log("Registered contests response:", response);
-        if (response.success && response.data) {
-          const registeredContests = new Set(response.data.contestIds);
-          setIsRegistered(registeredContests.has(contestId));
-        }
-      } catch (err) {
-        console.error("Failed to fetch registration status:", err);
-      }
-    };
-
-    fetchContest();
-    fetchRegistrationStatus();
+    loadContestData();
   }, [contestId]);
 
   useEffect(() => {

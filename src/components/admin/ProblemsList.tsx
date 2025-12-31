@@ -1,15 +1,17 @@
-import { useState, useEffect, useRef } from "react";
-import { useNavigate } from "react-router-dom";
-import { apiRequest } from "@/utils/axios/ApiRequest";
+import React, { useState, useEffect, useRef, lazy, Suspense } from "react";
 import { Search, Plus, X } from "lucide-react";
-import Table from "../layout/Table";
-import Pagination from "../layout/Pagination";
-import { useDebounce } from "@/hooks/useDebounce";
-import { lazy, Suspense } from "react";
-import { TableSkeleton } from "@/utils/SkeletonLoader";
-import { ApiResponse, IProblem, ProblemsResponse } from "@/types/ProblemTypes";
 import toast from "react-hot-toast";
+
+
+import Table from "@/components/layout/Table";
+import Pagination from "@/components/layout/Pagination";
+import { useDebounce } from "@/hooks/useDebounce";
+import { TableSkeleton } from "@/utils/SkeletonLoader";
 import { getSocket } from "@/utils/socket";
+import { IProblem } from "@/types/ProblemTypes";
+import { Column } from "@/types/ComponentsTypes";
+import { getAdminProblems } from "@/services/adminProblemService";
+import { useNavigate } from "react-router-dom";
 
 const ProcessProblemModal = lazy(() => import("./ProcessProblemModal"));
 
@@ -26,47 +28,42 @@ const ProblemsList: React.FC = () => {
     const saved = localStorage.getItem("newProblems");
     return saved ? JSON.parse(saved) : [];
   });
+
+  const navigate = useNavigate()
+
   const itemsPerPage = 10;
   const searchInputRef = useRef<HTMLInputElement>(null);
-  const navigate = useNavigate();
 
-  const fetchProblems = async (page: number, query: string = "") => {
+  const refreshProblems = async () => {
     setLoading(true);
+    setError(null);
     try {
-      const response = await apiRequest<ApiResponse<ProblemsResponse>>(
-        "get",
-        `/admin/problems?page=${page}&limit=${itemsPerPage}&search=${encodeURIComponent(query)}`
-      );
-      if (response.success && response.data) {
-        setProblems(response.data.problems);
-        setTotalPages(response.data.totalPages);
-        setCurrentPage(response.data.currentPage);
-      } else {
-        setError(response.message || "Invalid response structure");
-      }
-    } catch (err) {
-      console.error("Failed to fetch problems:", err);
-      setError("Failed to fetch problems");
-      toast.error("Failed to fetch problems");
+      const data = await getAdminProblems(currentPage, itemsPerPage, debouncedSearchQuery);
+      setProblems(data.problems);
+      setTotalPages(data.totalPages);
+    } catch (err: any) {
+      const msg = err.message || "Failed to refresh problems";
+      setError(msg);
+      toast.error(msg);
+      console.error("Refresh error:", err);
     } finally {
       setLoading(false);
-      searchInputRef.current?.focus();
     }
   };
 
   useEffect(() => {
-    fetchProblems(currentPage, debouncedSearchQuery);
+    refreshProblems();
   }, [currentPage, debouncedSearchQuery]);
 
   useEffect(() => {
     const socket = getSocket();
     if (!socket) {
-      console.warn("Socket not initialized in ProblemsList");
+      console.warn("Socket not initialized in Admin ProblemsList");
       return;
     }
 
     socket.on("newProblem", (notification: { slug: string; message: string }) => {
-      console.log("ProblemsList received newProblem:", notification);
+      console.log("Admin ProblemsList received newProblem:", notification);
       setNewProblems((prev) => {
         if (prev.includes(notification.slug)) return prev;
         const updated = [...new Set([...prev, notification.slug])];
@@ -78,8 +75,9 @@ const ProblemsList: React.FC = () => {
         return updated;
       });
     });
+
     socket.on("connect_error", (err) => {
-      console.error("ProblemsList Socket.IO connect error:", err.message);
+      console.error("Admin ProblemsList Socket.IO connect error:", err.message);
       toast.error("Failed to connect to notification service");
     });
 
@@ -106,7 +104,7 @@ const ProblemsList: React.FC = () => {
     }
   };
 
-  const columns = [
+  const columns: Column<IProblem>[] = [
     { key: "slug", header: "Slug", className: "max-w-[200px] truncate" },
     { key: "_id", header: "ID", className: "max-w-[100px] truncate" },
     { key: "title", header: "Title" },
@@ -176,10 +174,12 @@ const ProblemsList: React.FC = () => {
   };
 
   if (loading && !problems.length) return <TableSkeleton />;
+
   if (error) return <div className="text-red-500 text-center py-4" role="alert">{error}</div>;
 
   return (
     <div className="container mx-auto px-4 py-9 min-h-screen flex flex-col">
+      {/* Header + Search + Process Button */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
         <h1 className="text-2xl font-semibold text-primary">Problems List</h1>
         <div className="flex flex-col sm:flex-row gap-4 w-full sm:w-auto">
@@ -222,6 +222,7 @@ const ProblemsList: React.FC = () => {
               )
             )}
           </div>
+
           <button
             onClick={() => setIsProcessModalOpen(true)}
             className="flex items-center justify-center gap-2 bg-accent text-accent-foreground px-3 py-2 text-sm rounded-lg hover:bg-opacity-90 transition-colors w-full sm:w-auto focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -233,33 +234,37 @@ const ProblemsList: React.FC = () => {
         </div>
       </div>
 
+      {/* Table */}
       <div className="flex-1">
         <Table
           data={problems}
           columns={columns}
           onRowClick={handleRowClick}
           emptyMessage="No problems found"
-          aria-label="Problems table"
+          aria-label="Admin problems table"
         />
       </div>
 
+      {/* Pagination */}
       {totalPages > 1 && (
         <div className="mt-6">
           <Pagination
             currentPage={currentPage}
             totalPages={totalPages}
             onPageChange={setCurrentPage}
-            aria-label="Problems pagination"
+            aria-label="Admin problems pagination"
           />
         </div>
       )}
 
+      {/* Process New Problem Modal */}
       <Suspense fallback={<div aria-live="polite">Loading Process Modal...</div>}>
         <ProcessProblemModal
           isOpen={isProcessModalOpen}
           onClose={() => setIsProcessModalOpen(false)}
-          onSuccess={(slug) => {
-            fetchProblems(currentPage);
+          onSuccess={async (slug) => {
+            // Refresh the list after new problem is processed
+            await refreshProblems();
             handleProblemProcessed(slug);
           }}
           newProblems={newProblems}

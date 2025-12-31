@@ -1,28 +1,14 @@
-import { useEffect, useState } from "react";
+import { useState, useEffect } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
-import { apiRequest } from "@/utils/axios/ApiRequest";
-import { useAppDispatch, useAppSelector } from "@/redux/Store";
-import { updateUserProfile } from "@/redux/thunks/UserThunks";
 
-interface UserSubscription {
-  planId: string;
-  price: number;
-  status: string;
-  currentPeriodEnd: string;
-}
+import { verifyCurrentSubscription } from "@/services/successPageTypes";
 
-interface ApiResponse<T> {
-  success: boolean;
-  data?: T;
-  message?: string;
-}
 
 const SuccessPage = () => {
   const location = useLocation();
   const navigate = useNavigate();
-  const dispatch = useAppDispatch();
-  const authUser = useAppSelector((state) => state.auth.user);
+
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -30,39 +16,34 @@ const SuccessPage = () => {
     const sessionId = new URLSearchParams(location.search).get("session_id");
 
     if (!sessionId) {
-      setError("Invalid session ID");
+      setError("Invalid session ID. Please try again or contact support.");
       setLoading(false);
       return;
     }
 
-    const verifySubscription = async () => {
+    const verify = async () => {
       try {
-        const response = await apiRequest<ApiResponse<UserSubscription>>("get", "/subscriptions/current");
+        const subscription = await verifyCurrentSubscription();
 
-        if (response.success && response.data && response.data.status === "active") {
-          toast.success("Subscription successful! Your plan is now active.");
-
-          if (authUser) {
-            await dispatch(updateUserProfile({
-              fullName: authUser.fullName,
-              github: authUser.github || "",
-              linkedin: authUser.linkedin || "",
-              profileImage: authUser.profileImage || "",
-            }));
-          }
+        if (subscription?.status === "active") {
+          toast.success("Subscription activated successfully! Welcome to premium!", {
+            duration: 5000,
+          });
         } else {
-          setError("No active subscription found. Please try again or contact support.");
+          throw new Error("Subscription is not active yet. Please wait a moment.");
         }
-      } catch (err) {
-        console.error("Failed to verify subscription:", err);
-        setError("Failed to verify subscription. Please try again or contact support.");
+      } catch (err: any) {
+        const msg = err.message || "Failed to verify subscription";
+        setError(msg);
+        toast.error(msg);
+        console.error("Subscription verification error:", err);
       } finally {
         setLoading(false);
       }
     };
 
-    verifySubscription();
-  }, []);
+    verify();
+  }, [location.search]);
 
   if (loading) {
     return (
@@ -78,12 +59,12 @@ const SuccessPage = () => {
 
   if (error) {
     return (
-      <div className="container mx-auto px-4 min-h-screen flex flex-col justify-center items-center">
-        <h1 className="text-2xl font-bold text-red-500">Error</h1>
-        <p className="mt-4 text-lg">{error}</p>
+      <div className="container mx-auto px-4 min-h-screen flex flex-col justify-center items-center text-center">
+        <h1 className="text-2xl font-bold text-red-500 mb-4">Oops!</h1>
+        <p className="text-lg mb-6">{error}</p>
         <button
           onClick={() => navigate("/user/subscription")}
-          className="mt-6 bg-primary text-primary-foreground py-2 px-4 rounded-lg hover:bg-primary/90"
+          className="bg-primary text-primary-foreground py-2 px-6 rounded-lg hover:bg-primary/90 transition-colors"
         >
           Back to Subscription
         </button>
@@ -92,24 +73,29 @@ const SuccessPage = () => {
   }
 
   return (
-    <div className="container mx-auto px-4 min-h-screen flex flex-col justify-center items-center">
-      <h1 className="text-3xl font-bold text-green-500">Subscription Successful!</h1>
-      <p className="mt-4 text-lg text-center">
-        Your subscription has been activated. You now have access to premium features!
-      </p>
-      <div className="mt-6 flex gap-4">
-        <button
-          onClick={() => navigate("/user/subscription")}
-          className="bg-primary text-primary-foreground py-2 px-4 rounded-lg hover:bg-primary/90"
-        >
-          View Subscription
-        </button>
-        <button
-          onClick={() => navigate("/user/dashboard")}
-          className="bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 py-2 px-4 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600"
-        >
-          Go to Dashboard
-        </button>
+    <div className="container mx-auto px-4 min-h-screen flex flex-col justify-center items-center text-center">
+      <div className="max-w-md">
+        <h1 className="text-4xl font-bold text-green-500 mb-6">Success! 🎉</h1>
+        <p className="text-xl mb-8">
+          Your subscription has been activated successfully.
+          <br />
+          Enjoy full access to premium features!
+        </p>
+
+        <div className="flex flex-col sm:flex-row gap-4 justify-center">
+          <button
+            onClick={() => navigate("/user/subscription")}
+            className="bg-primary text-primary-foreground py-3 px-8 rounded-lg hover:bg-primary/90 transition-colors font-medium"
+          >
+            View Subscription
+          </button>
+          <button
+            onClick={() => navigate("/user/dashboard")}
+            className="bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 py-3 px-8 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors font-medium"
+          >
+            Go to Dashboard
+          </button>
+        </div>
       </div>
     </div>
   );

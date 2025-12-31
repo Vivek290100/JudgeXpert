@@ -1,33 +1,11 @@
-import { useState, useEffect } from "react";
-import { apiRequest } from "@/utils/axios/ApiRequest";
+import React, { useState, useEffect } from "react";
 import { ArrowRight } from "lucide-react";
+import toast from "react-hot-toast";
 import FAQSection from "../home/FaqSection";
+import { Plan, UserSubscription } from "@/types/subscriptionPageTypes";
+import { createCheckoutSession, getCurrentSubscription } from "@/services/SubscriptionPageTypes";
 
-interface Plan {
-  id: string;
-  name: string;
-  price: number; // Price in rupees
-  interval: "month" | "year";
-  description: string;
-  popular?: boolean;
-}
 
-interface CheckoutResponse {
-  checkoutUrl: string;
-}
-
-interface ApiResponse<T> {
-  success: boolean;
-  data?: T;
-  message?: string;
-}
-
-interface UserSubscription {
-  planId: string;
-  price: number; // Price in paise
-  status: string;
-  currentPeriodEnd: string;
-}
 
 const SubscriptionPage: React.FC = () => {
   const [loading, setLoading] = useState<string | null>(null);
@@ -39,41 +17,39 @@ const SubscriptionPage: React.FC = () => {
     {
       id: "monthly",
       name: "Monthly",
-      price: 299, // Price in rupees
+      price: 299,
       interval: "month",
       description: "Access premium problems for 1 month",
     },
     {
       id: "yearly",
       name: "Annual",
-      price: 2499, // Price in rupees
+      price: 2499,
       interval: "year",
       description: "Access premium problems for 1 year",
       popular: true,
     },
   ];
 
+  // Fetch current subscription on mount
   useEffect(() => {
-    const fetchSubscription = async () => {
+    const fetch = async () => {
       try {
-        const response = await apiRequest<ApiResponse<UserSubscription>>("get", "/subscriptions/current");
-        console.log("Subscription API response:", response);
-        if (response.success && response.data) {
-          setUserSubscription(response.data);
-          const currentPeriodEnd = new Date(response.data.currentPeriodEnd);
+        const sub = await getCurrentSubscription();
+        setUserSubscription(sub);
+
+        if (sub) {
+          const currentEnd = new Date(sub.currentPeriodEnd);
           const now = new Date();
-          setIsExpired(response.data.status === "active" && currentPeriodEnd <= now);
-        } else {
-          setUserSubscription(null);
-          setIsExpired(false);
+          setIsExpired(sub.status === "active" && currentEnd <= now);
         }
-      } catch (err) {
+      } catch (err: any) {
         console.error("Failed to fetch subscription:", err);
-        setError("Failed to fetch subscription status.");
+        setError("Failed to load subscription status.");
       }
     };
 
-    fetchSubscription();
+    fetch();
   }, []);
 
   const handleSubscribe = async (planId: string) => {
@@ -81,31 +57,29 @@ const SubscriptionPage: React.FC = () => {
     setError(null);
 
     try {
-      const response = await apiRequest<ApiResponse<CheckoutResponse>>(
-        "post",
-        "/subscriptions/checkout",
-        { planId }
-      );
-
-      if (response.success && response.data?.checkoutUrl) {
-        window.location.href = response.data.checkoutUrl;
-      } else {
-        setError(response.message || "Failed to create subscription. Please try again.");
-      }
-    } catch (err) {
+      const { checkoutUrl } = await createCheckoutSession(planId);
+      toast.success("Redirecting to checkout...");
+      window.location.href = checkoutUrl;
+    } catch (err: any) {
+      const msg = err.message || "Failed to start subscription process.";
+      setError(msg);
+      toast.error(msg);
       console.error("Subscription error:", err);
-      setError("Failed to process subscription. Please try again later.");
     } finally {
       setLoading(null);
     }
   };
 
-  const hasActiveSubscription = !!(userSubscription && userSubscription.status === "active" && !isExpired);
+  const hasActiveSubscription = !!(
+    userSubscription &&
+    userSubscription.status === "active" &&
+    !isExpired
+  );
 
   const formatPrice = (priceInPaise: number | undefined): string => {
     if (priceInPaise === undefined) return "Unknown";
-    const priceInRupees = priceInPaise / 100;
-    return priceInRupees % 1 === 0 ? priceInRupees.toFixed(0) : priceInRupees.toFixed(2);
+    const rupees = priceInPaise / 100;
+    return rupees % 1 === 0 ? rupees.toFixed(0) : rupees.toFixed(2);
   };
 
   return (
@@ -124,15 +98,22 @@ const SubscriptionPage: React.FC = () => {
 
       {hasActiveSubscription && (
         <div className="text-green-500 text-center py-4 mb-6">
-          You have an active {userSubscription.planId} subscription costing ₹{formatPrice(userSubscription.price*100)}/
+          You have an active {userSubscription.planId} subscription costing ₹
+          {formatPrice(userSubscription.price * 100)}/
           {userSubscription.planId === "monthly" ? "month" : "year"}, valid until{" "}
-          {new Date(userSubscription.currentPeriodEnd).toLocaleDateString()}. You can subscribe to another plan after this expires.
+          {new Date(userSubscription.currentPeriodEnd).toLocaleDateString()}.
+          <br />
+          You can subscribe to another plan after this expires.
         </div>
       )}
 
       <div className="flex flex-col md:flex-row gap-6 justify-center">
         {plans.map((plan) => {
-          const isActive = userSubscription?.planId === plan.id && userSubscription?.status === "active" && !isExpired;
+          const isActive =
+            userSubscription?.planId === plan.id &&
+            userSubscription?.status === "active" &&
+            !isExpired;
+
           return (
             <div
               key={plan.id}
@@ -155,7 +136,9 @@ const SubscriptionPage: React.FC = () => {
                 </div>
               </div>
 
-              <p className="text-gray-600 dark:text-gray-400 text-center mb-6">{plan.description}</p>
+              <p className="text-gray-600 dark:text-gray-400 text-center mb-6">
+                {plan.description}
+              </p>
 
               <button
                 onClick={() => handleSubscribe(plan.id)}

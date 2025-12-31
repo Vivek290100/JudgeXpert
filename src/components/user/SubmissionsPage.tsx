@@ -1,26 +1,19 @@
 import React, { useState, useEffect } from "react";
 import { useLocation, Link } from "react-router-dom";
-import { apiRequest } from "@/utils/axios/ApiRequest";
-import { CheckCircle, XCircle, Award, ChevronUp } from "lucide-react";
+import { CheckCircle, XCircle, Award, X } from "lucide-react";
 import CodeMirror from "@uiw/react-codemirror";
 import { cpp } from "@codemirror/lang-cpp";
 import { javascript } from "@codemirror/lang-javascript";
+import toast from "react-hot-toast";
+import { getUserSubmissions } from "@/services/submissionService";
+import { Submission } from "@/types/SubmissionsPageTypes";
 
-interface Submission {
-  _id: string;
-  language: string;
-  passed: boolean;
-  testCasesPassed: number;
-  totalTestCases: number;
-  createdAt: string;
-  executionTime: number;
-  contestId?: string | null;
-  contestTitle?: string | null;
-  code: string;
-}
+
+
 
 const SubmissionsPage: React.FC = () => {
   const location = useLocation();
+
   const queryParams = new URLSearchParams(location.search);
   const problemSlug = queryParams.get("problemSlug");
   const contestId = queryParams.get("contestId");
@@ -31,32 +24,24 @@ const SubmissionsPage: React.FC = () => {
   const [selectedSubmission, setSelectedSubmission] = useState<Submission | null>(null);
 
   useEffect(() => {
-    const fetchSubmissions = async () => {
+    const fetch = async () => {
       setLoading(true);
+      setError(null);
+
       try {
-        const query = new URLSearchParams();
-        if (problemSlug) query.append("problemSlug", problemSlug);
-        if (contestId) query.append("contestId", contestId);
-
-        const response = await apiRequest<{ success: boolean; data: { submissions: Submission[] } }>(
-          "get",
-          `/submissions${query.toString() ? `?${query.toString()}` : ""}`
-        );
-
-        if (response.success) {
-          setSubmissions(response.data.submissions);
-        } else {
-          setError("Failed to fetch submissions");
-        }
-      } catch (err) {
-        setError("Failed to fetch submissions. Please try again.");
-        console.error(err);
+        const data = await getUserSubmissions({ problemSlug: problemSlug || undefined, contestId: contestId || undefined });
+        setSubmissions(data);
+      } catch (err: any) {
+        const msg = err.message || "Failed to load submissions";
+        setError(msg);
+        toast.error(msg);
+        console.error("Submissions fetch error:", err);
       } finally {
         setLoading(false);
       }
     };
 
-    fetchSubmissions();
+    fetch();
   }, [problemSlug, contestId]);
 
   const getLanguageExtension = (language: string) => {
@@ -74,7 +59,11 @@ const SubmissionsPage: React.FC = () => {
   const closeModal = () => setSelectedSubmission(null);
 
   if (loading) {
-    return <div className="flex-1 flex items-center justify-center min-h-screen">Loading submissions...</div>;
+    return (
+      <div className="flex-1 flex items-center justify-center min-h-screen">
+        Loading submissions...
+      </div>
+    );
   }
 
   if (error) {
@@ -88,6 +77,7 @@ const SubmissionsPage: React.FC = () => {
   return (
     <div className="min-h-screen bg-background p-6">
       <h1 className="text-2xl font-bold text-primary mb-6">Your Submissions</h1>
+
       {submissions.length === 0 ? (
         <p className="text-foreground text-center">No submissions found.</p>
       ) : (
@@ -147,6 +137,7 @@ const SubmissionsPage: React.FC = () => {
           </table>
         </div>
       )}
+
       <div className="mt-6">
         <Link
           to={contestId ? `/user/contests/${contestId}` : "/user/problems"}
@@ -156,20 +147,22 @@ const SubmissionsPage: React.FC = () => {
         </Link>
       </div>
 
-      {/* Modal for Code Viewing */}
+      {/* Code Viewing Modal */}
       {selectedSubmission && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div
-            className="bg-white dark:bg-gray-800 text-gray-900 dark:text-white rounded-lg p-6 w-full max-w-3xl"
-          >
+          <div className="bg-white dark:bg-gray-800 text-gray-900 dark:text-white rounded-lg p-6 w-full max-w-3xl max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center mb-4">
               <h2 className="text-xl font-semibold">
                 Submission - {selectedSubmission.language.toUpperCase()}
               </h2>
-              <button onClick={closeModal} className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">
-                <ChevronUp className="w-6 h-6" />
+              <button
+                onClick={closeModal}
+                className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+              >
+                <X className="w-6 h-6" />
               </button>
             </div>
+
             <CodeMirror
               value={selectedSubmission.code}
               height="400px"
@@ -178,19 +171,23 @@ const SubmissionsPage: React.FC = () => {
               readOnly
               className="border rounded"
             />
-            <div className="mt-4 flex justify-between">
+
+            <div className="mt-4 flex justify-between text-sm">
               <p>
-                Status: <span className={selectedSubmission.passed ? "text-green-500" : "text-red-500"}>
+                Status:{" "}
+                <span className={selectedSubmission.passed ? "text-green-500" : "text-red-500"}>
                   {selectedSubmission.passed ? "Passed" : "Failed"}
                 </span>
               </p>
               <p>
-                Test Cases: {selectedSubmission.testCasesPassed}/{selectedSubmission.totalTestCases}
+                Test Cases: {selectedSubmission.testCasesPassed}/
+                {selectedSubmission.totalTestCases}
               </p>
             </div>
+
             <button
               onClick={closeModal}
-              className="mt-4 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+              className="mt-4 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
             >
               Close
             </button>
