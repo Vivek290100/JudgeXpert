@@ -181,7 +181,7 @@ const ProblemsList: React.FC = () => {
               </button>
               <button
                 onClick={handleSubscribe}
-                className="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-dark transition-colors"
+                className="px-4 py-2 bg-primary text-gray-800 rounded-lg hover:bg-primary-dark transition-colors"
               >
                 Subscribe Now
               </button>
